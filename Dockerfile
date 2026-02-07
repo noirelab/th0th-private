@@ -14,7 +14,7 @@ COPY packages ./packages
 COPY apps/tools-api ./apps/tools-api
 
 # Instala dependências
-RUN bun install --frozen-lockfile
+RUN bun install
 
 # Build do projeto
 RUN bun run build
