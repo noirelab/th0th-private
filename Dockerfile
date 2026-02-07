@@ -25,5 +25,6 @@ EXPOSE 3333
 HEALTHCHECK --interval=30s --timeout=3s --start-period=40s --retries=3 \
   CMD node -e "require('http').get('http://localhost:3333/health', (r) => {process.exit(r.statusCode === 200 ? 0 : 1)})"
 
-# Comando para iniciar a API (mantém WORKDIR em /app para preservar contexto do monorepo)
-CMD ["bun", "run", "apps/tools-api/src/index.ts"]
+# Comando para iniciar a API
+# Usa bun com o caminho completo do arquivo no contexto do monorepo
+CMD ["bun", "--cwd", "/app/apps/tools-api", "run", "src/index.ts"]
