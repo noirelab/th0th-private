@@ -51,3 +51,4 @@ temp/
 # Chrome/Vector DB
 chroma/
 chromadb/
+.git-corrupted/

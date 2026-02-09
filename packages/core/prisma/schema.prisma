@@ -1,0 +1,108 @@
+// Prisma Schema para th0th.db
+// Base de dados consolidada para queries e relatórios
+// Read-only - dados sincronizados via triggers dos bancos operacionais
+
+generator client {
+  provider = "prisma-client-js"
+  output   = "../src/generated/prisma"
+}
+
+datasource db {
+  provider = "sqlite"
+}
+
+// ========================================
+// Memories (sincronizado de memories.db)
+// ========================================
+model Memory {
+  id            String   @id
+  content       String
+  type          String   // preference, conversation, code, decision, pattern
+  level         Int
+  userId        String?  @map("user_id")
+  sessionId     String?  @map("session_id")
+  projectId     String?  @map("project_id")
+  agentId       String?  @map("agent_id")
+  importance    Float    @default(0.5)
+  tags          String?  // JSON array
+  metadata      String?
+  createdAt     DateTime @default(now()) @map("created_at")
+  updatedAt     DateTime @updatedAt @map("updated_at")
+  accessCount   Int      @default(0) @map("access_count")
+
+  @@index([userId])
+  @@index([sessionId])
+  @@index([projectId])
+  @@index([agentId])
+  @@index([type])
+  @@index([importance(sort: Desc)])
+  @@index([createdAt(sort: Desc)])
+  @@map("memories")
+}
+
+// ========================================
+// Projects (sincronizado de vector-store.db)
+// ========================================
+model Project {
+  id            String    @id @default(cuid())
+  projectId     String    @unique @map("project_id")
+  path          String
+  documentCount Int       @default(0) @map("document_count")
+  totalSize     Int       @default(0) @map("total_size")
+  lastIndexed   DateTime? @map("last_indexed")
+  createdAt     DateTime  @default(now()) @map("created_at")
+  updatedAt     DateTime  @updatedAt @map("updated_at")
+
+  documents Document[]
+
+  @@index([projectId])
+  @@index([lastIndexed(sort: Desc)])
+  @@map("projects")
+}
+
+model Document {
+  id         String   @id @default(cuid())
+  projectId  String   @map("project_id")
+  filePath   String   @map("file_path")
+  fileType   String?  @map("file_type")
+  size       Int      @default(0)
+  indexedAt  DateTime @map("indexed_at")
+  
+  project    Project  @relation(fields: [projectId], references: [projectId])
+
+  @@index([projectId])
+  @@index([fileType])
+  @@index([indexedAt(sort: Desc)])
+  @@map("documents")
+}
+
+// ========================================
+// Search Analytics
+// ========================================
+model SearchQuery {
+  id           String   @id @default(cuid())
+  query        String
+  projectId    String?  @map("project_id")
+  resultsCount Int      @default(0) @map("results_count")
+  duration     Int      // milliseconds
+  cacheHit     Boolean  @default(false) @map("cache_hit")
+  timestamp    DateTime @default(now())
+
+  @@index([projectId])
+  @@index([timestamp(sort: Desc)])
+  @@map("search_queries")
+}
+
+model CacheStats {
+  id        String   @id @default(cuid())
+  projectId String   @map("project_id")
+  queryHash String   @map("query_hash")
+  hitCount  Int      @default(0) @map("hit_count")
+  createdAt DateTime @default(now()) @map("created_at")
+  lastHitAt DateTime @updatedAt @map("last_hit_at")
+
+  @@unique([projectId, queryHash])
+  @@index([projectId])
+  @@index([hitCount(sort: Desc)])
+  @@map("cache_stats")
+}
