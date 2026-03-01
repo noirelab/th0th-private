@@ -41,13 +41,14 @@ import { logger } from "@th0th/shared";
 export interface CreateProviderOptions {
   /**
    * Provider to use:
-   * - 'auto': Try providers by priority until one works
+   * - 'auto': Try providers by priority until one works (Ollama first)
+   * - 'ollama': Ollama local embeddings (768D, free, local-first)
    * - 'mistralText': Mistral text embeddings (1024D)
    * - 'mistralCode': Mistral code embeddings (1536D)
    *
    * Default: 'auto'
    */
-  provider?: "auto" | "mistralText" | "mistralCode";
+  provider?: "auto" | "ollama" | "mistralText" | "mistralCode";
 
   /**
    * Enable transparent caching using SHA-256 content hashing
@@ -150,7 +151,12 @@ export async function createEmbeddingProvider(
 
     if (!baseProvider) {
       throw new Error(
-        "No embedding providers available. Please configure at least one provider:\n" +
+        "No embedding providers available. For local-first setup:\n" +
+          "1. Install Ollama: curl -fsSL https://ollama.com/install.sh | sh\n" +
+          "2. Start Ollama: ollama serve\n" +
+          "3. Pull model: ollama pull nomic-embed-text:latest\n" +
+          "\n" +
+          "Or configure a remote provider:\n" +
           "- MISTRAL_API_KEY (Mistral AI text and code embeddings)",
       );
     }

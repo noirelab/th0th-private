@@ -124,91 +124,111 @@ export class SQLiteVectorStore implements IVectorStore {
 
   /**
    * Add multiple documents in batch
+   *
+   * Uses sub-batching to prevent overwhelming Ollama:
+   * - Splits documents into small sub-batches (EMBED_SUB_BATCH_SIZE)
+   * - Each sub-batch gets its own embedBatch() call
+   * - If a sub-batch fails, falls back to per-document embedding for that sub-batch only
+   *
+   * This avoids the previous problem where 50+ chunks from a large .md file
+   * would be sent as a single Ollama API call, causing 500 errors.
    */
   async addDocuments(documents: VectorDocument[]): Promise<void> {
-    try {
-      const embeddings = await this.embeddingService.embedBatch(
-        documents.map(d => d.content)
-      );
+    if (documents.length === 0) return;
 
-      const insertStmt = this.db.prepare(`
-        INSERT OR REPLACE INTO vector_documents 
-        (id, project_id, content, metadata, embedding, created_at, updated_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?)
-      `);
+    // Sub-batch size: max texts per single embedBatch() call to Ollama
+    // Ollama bge-m3 crashes on large batches (50+), 8 is safe and fast
+    const EMBED_SUB_BATCH_SIZE = 8;
 
-      const insertMany = this.db.transaction((docs: VectorDocument[], embeds: number[][]) => {
-        for (let i = 0; i < docs.length; i++) {
-          const doc = docs[i];
-          const projectId = doc.metadata?.projectId as string || 'default';
-          
-          insertStmt.run(
-            doc.id,
-            projectId,
-            doc.content,
-            JSON.stringify(doc.metadata || {}),
-            Buffer.from(new Float32Array(embeds[i]).buffer),
-            Date.now(),
-            Date.now()
-          );
-        }
-      });
+    const insertStmt = this.db.prepare(`
+      INSERT OR REPLACE INTO vector_documents 
+      (id, project_id, content, metadata, embedding, created_at, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?)
+    `);
 
-      insertMany(documents, embeddings);
+    const insertMany = this.db.transaction((docs: VectorDocument[], embeds: number[][]) => {
+      const now = Date.now();
+      for (let i = 0; i < docs.length; i++) {
+        const doc = docs[i];
+        const projectId = doc.metadata?.projectId as string || 'default';
+        
+        insertStmt.run(
+          doc.id,
+          projectId,
+          doc.content,
+          JSON.stringify(doc.metadata || {}),
+          Buffer.from(new Float32Array(embeds[i]).buffer),
+          now,
+          now
+        );
+      }
+    });
 
-      logger.debug('Batch documents added to vector store', { 
-        count: documents.length 
-      });
+    let totalInserted = 0;
+    let totalFailed = 0;
 
-    } catch (error) {
-      logger.warn('Batch embedding failed, falling back to per-document embedding', {
-        count: documents.length,
-        error: (error as Error).message,
-      });
+    // Process in sub-batches
+    for (let i = 0; i < documents.length; i += EMBED_SUB_BATCH_SIZE) {
+      const subBatch = documents.slice(i, i + EMBED_SUB_BATCH_SIZE);
 
-      const insertStmt = this.db.prepare(`
-        INSERT OR REPLACE INTO vector_documents 
-        (id, project_id, content, metadata, embedding, created_at, updated_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?)
-      `);
+      try {
+        const embeddings = await this.embeddingService.embedBatch(
+          subBatch.map(d => d.content)
+        );
 
-      let inserted = 0;
-      let failed = 0;
+        insertMany(subBatch, embeddings);
+        totalInserted += subBatch.length;
 
-      for (const doc of documents) {
-        try {
-          const embedding = await this.embeddingService.embed(doc.content);
-          const projectId = doc.metadata?.projectId as string || 'default';
+        logger.debug('Sub-batch embedded and inserted', {
+          subBatchIndex: Math.floor(i / EMBED_SUB_BATCH_SIZE),
+          count: subBatch.length,
+          totalProgress: `${Math.min(i + EMBED_SUB_BATCH_SIZE, documents.length)}/${documents.length}`,
+        });
 
-          insertStmt.run(
-            doc.id,
-            projectId,
-            doc.content,
-            JSON.stringify(doc.metadata || {}),
-            Buffer.from(new Float32Array(embedding).buffer),
-            Date.now(),
-            Date.now()
-          );
+      } catch (error) {
+        logger.warn('Sub-batch embedding failed, falling back to per-document', {
+          subBatchIndex: Math.floor(i / EMBED_SUB_BATCH_SIZE),
+          count: subBatch.length,
+          error: (error as Error).message,
+        });
 
-          inserted++;
-        } catch (singleError) {
-          failed++;
-          logger.warn('Skipping document due to embedding error', {
-            id: doc.id,
-            error: (singleError as Error).message,
-          });
+        // Per-document fallback for this sub-batch only
+        for (const doc of subBatch) {
+          try {
+            const embedding = await this.embeddingService.embed(doc.content);
+            const projectId = doc.metadata?.projectId as string || 'default';
+            const now = Date.now();
+
+            insertStmt.run(
+              doc.id,
+              projectId,
+              doc.content,
+              JSON.stringify(doc.metadata || {}),
+              Buffer.from(new Float32Array(embedding).buffer),
+              now,
+              now
+            );
+
+            totalInserted++;
+          } catch (singleError) {
+            totalFailed++;
+            logger.warn('Skipping document due to embedding error', {
+              id: doc.id,
+              error: (singleError as Error).message,
+            });
+          }
         }
       }
+    }
 
-      logger.info('Per-document fallback finished', {
-        inserted,
-        failed,
-        total: documents.length,
-      });
+    logger.debug('Batch documents added to vector store', {
+      inserted: totalInserted,
+      failed: totalFailed,
+      total: documents.length,
+    });
 
-      if (inserted === 0) {
-        throw new Error('Failed to embed all documents in batch and fallback modes');
-      }
+    if (totalInserted === 0 && documents.length > 0) {
+      throw new Error('Failed to embed all documents in batch and fallback modes');
     }
   }
 

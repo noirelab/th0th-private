@@ -38,6 +38,7 @@ import { glob } from "glob";
 import ignoreModule from "ignore";
 import { minimatch } from "minimatch";
 import { FileFilterCache } from "./file-filter-cache.js";
+import { smartChunk } from "./smart-chunker.js";
 
 const globAsync = glob;
 const ignore = (ignoreModule as any).default || ignoreModule;
@@ -81,6 +82,18 @@ export class ContextualSearchRLM {
       "*.db-wal",
       ".env",
       ".env.*",
+      // Generated files (huge, low search value)
+      "**/generated/**",
+      "**/*.generated.*",
+      "**/*.d.ts",     // Type declaration files (usually auto-generated or from packages)
+      "**/*.wasm*",    // WebAssembly (binary, not searchable)
+      "**/*.min.*",    // Minified files
+      "**/*.map",      // Source maps
+      "**/lock.yaml",
+      "**/pnpm-lock.yaml",
+      "**/package-lock.json",
+      "**/bun.lockb",
+      "**/yarn.lock",
     ]);
 
     try {
@@ -387,6 +400,12 @@ export class ContextualSearchRLM {
 
   /**
    * Indexa um único arquivo, dividindo em chunks semânticos
+   *
+   * Uses the smart chunker which is language-aware:
+   * - Markdown: splits by headings with hierarchy context
+   * - JSON: splits by top-level keys
+   * - YAML: splits by document separators or top-level keys
+   * - Code: splits by functions/classes with preceding comments
    */
   private async indexFile(
     filePath: string,
@@ -406,8 +425,8 @@ export class ContextualSearchRLM {
       return { chunks: 0 };
     }
 
-    // Divide em chunks semânticos (funções, classes, etc.)
-    const chunks = this.extractSemanticChunks(content, filePath);
+    // Smart chunking: language/format-aware splitting
+    const chunks = smartChunk(content, relativePath);
 
     const documents: VectorDocument[] = chunks.map((chunk, i) => ({
       id: `${projectId}:${relativePath}:${i}`,
@@ -417,10 +436,11 @@ export class ContextualSearchRLM {
         filePath: relativePath,
         chunkIndex: i,
         totalChunks: chunks.length,
-        type: "code",
+        type: chunk.type,
         language: path.extname(filePath).slice(1),
         lineStart: chunk.lineStart,
         lineEnd: chunk.lineEnd,
+        label: chunk.label,
       },
     }));
 
@@ -428,7 +448,7 @@ export class ContextualSearchRLM {
     // Since embeddings are generated during addDocuments(), we can run
     // FTS5 keyword indexing concurrently to save ~30% total time
     await Promise.all([
-      // Vector store: batch embedding + insert
+      // Vector store: sub-batched embedding + insert
       this.vectorStore.addDocuments(documents),
       
       // Keyword search: parallel FTS5 inserts
@@ -440,128 +460,6 @@ export class ContextualSearchRLM {
     ]);
 
     return { chunks: chunks.length };
-  }
-
-  /**
-   * Extrai chunks semânticos de código
-   */
-  private extractSemanticChunks(
-    content: string,
-    filePath: string,
-  ): Array<{
-    content: string;
-    lineStart: number;
-    lineEnd: number;
-  }> {
-    const lines = content.split("\n");
-    const chunks: Array<{
-      content: string;
-      lineStart: number;
-      lineEnd: number;
-    }> = [];
-
-    // Padrões para detectar início de blocos semânticos
-    const blockPatterns = [
-      /^\s*(export\s+)?(class|interface|type|enum)\s+\w+/, // Classes, interfaces
-      /^\s*(export\s+)?(async\s+)?function\s+\w+/, // Funções
-      /^\s*(export\s+)?const\s+\w+\s*=\s*(async\s*)?\(/, // Arrow functions
-      /^\s*(export\s+)?(async\s+)?\w+\s*\([^)]*\)\s*(:\s*\w+)?\s*\{/, // Métodos
-      /^\s*describe\s*\(/, // Testes
-      /^\s*it\s*\(/, // Testes
-    ];
-
-    let currentChunk: { lines: string[]; startLine: number } | null = null;
-    let braceCount = 0;
-    let inBlock = false;
-
-    for (let i = 0; i < lines.length; i++) {
-      const line = lines[i];
-      const isBlockStart = blockPatterns.some((pattern) => pattern.test(line));
-
-      if (isBlockStart && !inBlock) {
-        // Salva chunk anterior se existir
-        if (currentChunk && currentChunk.lines.length > 0) {
-          const endLine = Math.max(currentChunk.startLine, i); // Ensure lineEnd >= lineStart
-          chunks.push({
-            content: currentChunk.lines.join("\n"),
-            lineStart: currentChunk.startLine,
-            lineEnd: endLine,
-          });
-        }
-
-        // Inicia novo chunk
-        currentChunk = {
-          lines: [line],
-          startLine: i + 1,
-        };
-        inBlock = true;
-        braceCount =
-          (line.match(/\{/g) || []).length - (line.match(/\}/g) || []).length;
-      } else if (inBlock && currentChunk) {
-        currentChunk.lines.push(line);
-        braceCount +=
-          (line.match(/\{/g) || []).length - (line.match(/\}/g) || []).length;
-
-        // Fim do bloco
-        if (braceCount <= 0 && line.trim().endsWith("}")) {
-          chunks.push({
-            content: currentChunk.lines.join("\n"),
-            lineStart: currentChunk.startLine,
-            lineEnd: i + 1,
-          });
-          currentChunk = null;
-          inBlock = false;
-          braceCount = 0;
-        }
-      } else if (!inBlock && line.trim()) {
-        // Linhas fora de blocos (imports, exports, etc.)
-        if (!currentChunk) {
-          currentChunk = {
-            lines: [],
-            startLine: i + 1,
-          };
-        }
-        currentChunk.lines.push(line);
-      }
-    }
-
-    // Adiciona chunk final
-    if (currentChunk && currentChunk.lines.length > 0) {
-      chunks.push({
-        content: currentChunk.lines.join("\n"),
-        lineStart: currentChunk.startLine,
-        lineEnd: lines.length,
-      });
-    }
-
-    // Se não encontrou chunks semânticos, divide em chunks de tamanho fixo
-    if (chunks.length === 0) {
-      const CHUNK_SIZE = 50; // linhas
-      for (let i = 0; i < lines.length; i += CHUNK_SIZE) {
-        const chunkLines = lines.slice(i, i + CHUNK_SIZE);
-        chunks.push({
-          content: chunkLines.join("\n"),
-          lineStart: i + 1,
-          lineEnd: Math.min(i + CHUNK_SIZE, lines.length),
-        });
-      }
-    }
-
-    // Validate all chunks: ensure lineEnd >= lineStart
-    chunks.forEach((chunk, index) => {
-      if (chunk.lineEnd < chunk.lineStart) {
-        logger.warn("Invalid chunk detected: lineEnd < lineStart", {
-          filePath,
-          chunkIndex: index,
-          lineStart: chunk.lineStart,
-          lineEnd: chunk.lineEnd,
-        });
-        // Fix: set lineEnd to lineStart
-        chunk.lineEnd = chunk.lineStart;
-      }
-    });
-
-    return chunks;
   }
 
   /**

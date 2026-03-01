@@ -5,7 +5,6 @@
 # preload = []
 coverage = true
 coverageDir = "./coverage"
-coverageReporter = ["text", "lcov", "html"]
 
 # Test pattern matching
 testMatch = ["**/*.test.ts", "**/*.spec.ts"]

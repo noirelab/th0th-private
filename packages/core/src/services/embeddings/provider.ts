@@ -210,10 +210,16 @@ export class AISDKEmbeddingProvider implements EmbeddingProvider {
 
   /**
    * Truncate text to fit model context length
-   * BGE-M3: 8192 tokens max (~2k chars for max safety - code tokenizes very densely)
+   *
+   * BGE-M3 has an 8192 token context window.
+   * With smart chunking, chunks are much smaller and more semantic,
+   * so we can afford a higher character limit.
+   *
+   * Token estimation: ~4 chars/token for English text, ~2-3 for code.
+   * 4000 chars ≈ 1000-2000 tokens, well within 8192 limit.
    */
   private truncateText(text: string): string {
-    const MAX_CHARS = 2000; // Ultra-conservative limit for 8192 tokens (~500 tokens)
+    const MAX_CHARS = 4000; // ~1000-2000 tokens, safe for 8192 token context
     
     if (text.length <= MAX_CHARS) {
       return text;

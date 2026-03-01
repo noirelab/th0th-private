@@ -4,6 +4,8 @@
  *
  * API REST com ElysiaJS que expõe todas as ferramentas do th0th.
  * Separada do protocolo MCP para permitir múltiplos clientes.
+ *
+ * Local-First: Funciona 100% offline com Ollama + SQLite.
  */
 
 import "@th0th/shared/config";
@@ -17,8 +19,10 @@ import { memoryRoutes } from "./routes/memory.js";
 import { projectRoutes } from "./routes/project.js";
 import { contextRoutes } from "./routes/context.js";
 import { analyticsRoutes } from "./routes/analytics.js";
+import { systemRoutes } from "./routes/system.js";
 import { authMiddleware } from "./middleware/auth.js";
 import { errorHandler } from "./middleware/error.js";
+import { getHealthChecker } from "@th0th/core";
 
 const PORT = process.env.TH0TH_API_PORT || 3333;
 
@@ -42,6 +46,7 @@ const app = new Elysia({ adapter: node() })
             description: "Compressão e otimização de contexto",
           },
           { name: "analytics", description: "Métricas e analytics" },
+          { name: "system", description: "Sistema, health checks e métricas" },
         ],
       },
     }),
@@ -53,6 +58,7 @@ const app = new Elysia({ adapter: node() })
   .use(projectRoutes)
   .use(contextRoutes)
   .use(analyticsRoutes)
+  .use(systemRoutes)
   .get("/health", () => ({
     status: "ok",
     service: "th0th-tools-api",
@@ -63,5 +69,27 @@ const app = new Elysia({ adapter: node() })
 
 console.log(`th0th Tools API running at http://localhost:${PORT}`);
 console.log(`Swagger docs at http://localhost:${PORT}/swagger`);
+
+// Run local health check on startup (non-blocking)
+(async () => {
+  try {
+    const checker = getHealthChecker();
+    const report = await checker.checkAll();
+
+    if (report.status === "healthy") {
+      console.log(`Local-first health: ALL SERVICES HEALTHY`);
+    } else {
+      console.log(`Local-first health: ${report.status.toUpperCase()}`);
+      for (const rec of report.recommendations) {
+        console.log(`  -> ${rec}`);
+      }
+    }
+  } catch (error) {
+    console.error(
+      "Health check failed:",
+      error instanceof Error ? error.message : error,
+    );
+  }
+})();
 
 export type App = typeof app;

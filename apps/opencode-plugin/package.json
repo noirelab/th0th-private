@@ -1,0 +1,41 @@
+{
+  "name": "@th0th/opencode-plugin",
+  "version": "1.0.0",
+  "private": true,
+  "description": "th0th plugin for OpenCode - Semantic code search, memory, and context compression",
+  "type": "module",
+  "main": "src/index.ts",
+  "scripts": {
+    "dev": "bun run --watch src/index.ts",
+    "start": "bun run src/index.ts",
+    "build": "bun build src/index.ts --outdir=dist --target=bun",
+    "type-check": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@opencode-ai/plugin": "^1.2.15",
+    "@opencode-ai/sdk": "^1.2.15",
+    "@th0th/core": "workspace:*",
+    "@th0th/shared": "workspace:*"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.5",
+    "typescript": "^5.8.3"
+  },
+  "keywords": [
+    "opencode",
+    "plugin",
+    "th0th",
+    "semantic-search",
+    "code-search",
+    "memory",
+    "context-compression",
+    "ai",
+    "llm"
+  ],
+  "author": "",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/anomalyco/th0th"
+  }
+}

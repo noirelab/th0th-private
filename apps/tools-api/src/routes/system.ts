@@ -1,13 +1,16 @@
 /**
  * System Routes
  *
- * GET /api/v1/system/info    - Informações do sistema
- * GET /api/v1/system/status  - Status dos serviços
- * GET /api/v1/system/metrics - Métricas gerais
+ * GET /api/v1/system/info         - Informações do sistema
+ * GET /api/v1/system/status       - Status dos serviços
+ * GET /api/v1/system/metrics      - Métricas gerais
+ * GET /api/v1/system/health/local - Health check local-first (Ollama, DBs, etc.)
+ * GET /api/v1/system/ollama       - Status do Ollama e modelos disponíveis
  */
 
 import { Elysia } from "elysia";
 import { config } from "@th0th/shared";
+import { getHealthChecker } from "@th0th/core";
 import path from "path";
 import fs from "fs";
 import os from "os";
@@ -155,6 +158,46 @@ export const systemRoutes = new Elysia({ prefix: "/api/v1/system" })
         tags: ["system"],
         summary: "Get system metrics",
         description: "Get aggregated metrics and performance data",
+      },
+    },
+  )
+  .get(
+    "/health/local",
+    async () => {
+      const checker = getHealthChecker();
+      return await checker.checkAll();
+    },
+    {
+      detail: {
+        tags: ["system"],
+        summary: "Local-first health check",
+        description:
+          "Comprehensive health check of all local services: Ollama, SQLite databases, data directory. " +
+          "Returns status, latency, and recommendations for local-first operation.",
+      },
+    },
+  )
+  .get(
+    "/ollama",
+    async () => {
+      const checker = getHealthChecker();
+      const ollamaStatus = await checker.checkOllama();
+      const models = await checker.getOllamaModels();
+
+      return {
+        ...ollamaStatus,
+        models,
+        configuredModel:
+          process.env.OLLAMA_EMBEDDING_MODEL || "nomic-embed-text:latest",
+        baseUrl: process.env.OLLAMA_BASE_URL || "http://localhost:11434",
+      };
+    },
+    {
+      detail: {
+        tags: ["system"],
+        summary: "Ollama status",
+        description:
+          "Check Ollama availability, list installed models, and verify embedding model configuration.",
       },
     },
   );
