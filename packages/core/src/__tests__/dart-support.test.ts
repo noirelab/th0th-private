@@ -35,4 +35,21 @@ class User {
 
     expect(compressed.metadata.language).toBe("dart");
   });
+
+  test("JS side-effect import with class is not detected as Dart", async () => {
+    const compressor = new CodeCompressor();
+    const jsCode = `import "polyfill";
+
+class Counter {
+  count = 0;
+  increment() { this.count++; }
+}
+
+enum Direction { Up, Down }
+`;
+
+    const compressed = await compressor.compress(jsCode);
+
+    expect(compressed.metadata.language).not.toBe("dart");
+  });
 });
