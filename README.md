@@ -165,6 +165,25 @@ curl -X POST http://localhost:3333/api/v1/context/compress \
 
 Config file: `~/.config/th0th/config.json` (auto-created on first run)
 
+### Quick Config Commands
+
+```bash
+# Show current configuration
+npx @th0th/mcp-client --config-show
+
+# Show config file path
+npx @th0th/mcp-client --config-path
+
+# Show config directory
+npx @th0th/mcp-client --config-dir
+
+# Initialize configuration
+npx @th0th/mcp-client --config-init
+
+# Show help
+npx @th0th/mcp-client --help
+```
+
 ### Embedding Providers
 
 | Provider | Model | Cost | Quality |
@@ -173,13 +192,22 @@ Config file: `~/.config/th0th/config.json` (auto-created on first run)
 | **Mistral** | mistral-embed, codestral-embed | $$ | Great |
 | **OpenAI** | text-embedding-3-small | $$ | Great |
 
-### Switch Provider
+### Advanced Configuration
+
+For detailed configuration management, use the config CLI:
 
 ```bash
-npx th0th-config init                          # Ollama (default)
-npx th0th-config init --mistral your-api-key   # Mistral
-npx th0th-config init --openai your-api-key    # OpenAI
-npx th0th-config show                          # Show current config
+# Initialize with specific provider
+npx @th0th/mcp-client th0th-config init                          # Ollama (default)
+npx @th0th/mcp-client th0th-config init --mistral your-api-key   # Mistral
+npx @th0th/mcp-client th0th-config init --openai your-api-key    # OpenAI
+
+# Switch provider
+npx @th0th/mcp-client th0th-config use mistral --api-key your-key
+npx @th0th/mcp-client th0th-config use ollama --model bge-m3:latest
+
+# Set specific configuration values
+npx @th0th/mcp-client th0th-config set embedding.dimensions 1024
 ```
 
 ---
